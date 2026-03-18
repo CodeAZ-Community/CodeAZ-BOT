@@ -1,5 +1,5 @@
 from path import CONFIG_JSON, XP_JSON, SURVEY_JSON
-from discord.ext import commands
+from discord.ext import tasks, commands
 import discord
 import random
 import json
