@@ -187,6 +187,33 @@ async def notify_flagged_member(member):
             f"Could not send raid protection DM to {member.name} (ID: {member.id}): {error}"
         )
 
+async def ban_flagged_member(member, guild_id):
+    await notify_flagged_member(member)
+
+    try:
+        await member.ban(reason="Raid protection triggered during join lockdown")
+        logger.warning(
+            f"Raid protection banned {member.name} (ID: {member.id}) in guild "
+            f"{member.guild.name} (ID: {guild_id})"
+        )
+    except discord.Forbidden:
+        logger.error(
+            f"Missing permissions to ban {member.name} (ID: {member.id}) "
+            f"during raid protection"
+        )
+        return True
+    except discord.HTTPException as error:
+        logger.error(
+            f"Failed to ban {member.name} (ID: {member.id}) during raid protection: {error}"
+        )
+        return True
+
+    await send_raid_alert(
+        member,
+        f"Raid qoruması {member.mention} istifadəçisini serverdən banladı."
+    )
+    return False
+
 async def handle_raid_protection(member):
     if not config["features"].get("raid_protection", {}).get("enabled"):
         return True
@@ -195,10 +222,10 @@ async def handle_raid_protection(member):
     now = time.time()
     joins = raid_join_history[guild_id]
 
-    while joins and now - joins[0] > raid_per_seconds:
+    while joins and now - joins[0][0] > raid_per_seconds:
         joins.popleft()
 
-    joins.append(now)
+    joins.append((now, member.id))
 
     if len(joins) >= raid_max_joins and raid_lockdowns.get(guild_id, 0) < now:
         raid_lockdowns[guild_id] = now + raid_lockdown_seconds
@@ -211,44 +238,21 @@ async def handle_raid_protection(member):
             f"Raid qoruması aktivləşdirildi. Son {raid_per_seconds} saniyədə "
             f"{len(joins)} qoşulma oldu. Lockdown müddəti: {raid_lockdown_seconds} saniyə."
         )
+        processed_member_ids = set()
+        for _, joined_member_id in list(joins):
+            joined_member = member.guild.get_member(joined_member_id)
+            if joined_member is None or joined_member_id in processed_member_ids:
+                continue
+            processed_member_ids.add(joined_member_id)
+            await ban_flagged_member(joined_member, guild_id)
+        if member.id in processed_member_ids:
+            return member.guild.get_member(member.id) is not None
 
     lockdown_ends_at = raid_lockdowns.get(guild_id, 0)
     if lockdown_ends_at <= now:
         return True
 
-    account_age_seconds = (discord.utils.utcnow() - member.created_at).total_seconds()
-    if account_age_seconds >= raid_account_age_seconds:
-        logger.info(
-            f"Raid protection allowed {member.name} (ID: {member.id}) during lockdown "
-            f"because account age is {int(account_age_seconds)} seconds"
-        )
-        return True
-
-    await notify_flagged_member(member)
-
-    try:
-        await member.kick(reason="Raid protection triggered during join lockdown")
-        logger.warning(
-            f"Raid protection kicked {member.name} (ID: {member.id}) in guild "
-            f"{member.guild.name} (ID: {guild_id})"
-        )
-    except discord.Forbidden:
-        logger.error(
-            f"Missing permissions to kick {member.name} (ID: {member.id}) "
-            f"during raid protection"
-        )
-        return True
-    except discord.HTTPException as error:
-        logger.error(
-            f"Failed to kick {member.name} (ID: {member.id}) during raid protection: {error}"
-        )
-        return True
-
-    await send_raid_alert(
-        member,
-        f"Raid qoruması {member.mention} istifadəçisini hesabı çox yeni olduğu üçün serverdən çıxartdı."
-    )
-    return False
+    return await ban_flagged_member(member, guild_id)
 
 @bot.event
 async def on_member_join(member):
