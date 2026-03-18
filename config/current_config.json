@@ -82,6 +82,16 @@
       }
     },
 
+    "raid_protection": {
+      "enabled": true,
+      "max_joins": 5,
+      "per_seconds": 10,
+      "lockdown_seconds": 300,
+      "account_age_seconds": 604800,
+      "alert_channelID": 1414896752925999164,
+      "message": "Hesabınız {guild} serverinin raid qoruması tərəfindən şübhəli hesab edildi və serverdən çıxarıldınız. Əgər bu səhvdirsə, staff komandası ilə əlaqə saxlayın."
+    },
+
     "goodbye": {
       "enabled": true,
       "message": "Xoş getdin",

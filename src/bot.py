@@ -9,11 +9,14 @@ import asyncio
 import aiohttp
 import os
 import tempfile
+from collections import defaultdict, deque
 from log import logger
 
 # -- Constants -- #
 
 xp_cooldowns = {}
+raid_join_history = defaultdict(deque)
+raid_lockdowns = {}
 
 # -- XP Save Task -- #
 
@@ -96,6 +99,18 @@ if config["features"]["welcome"].get("enabled"):
     welcome_message = config["features"]["welcome"].get("message")
     welcome_role = config["features"]["welcome"]["role"].get("roleID")
 
+if config["features"].get("raid_protection", {}).get("enabled"):
+    raid_config = config["features"]["raid_protection"]
+    raid_max_joins = raid_config.get("max_joins", 5)
+    raid_per_seconds = raid_config.get("per_seconds", 10)
+    raid_lockdown_seconds = raid_config.get("lockdown_seconds", 300)
+    raid_account_age_seconds = raid_config.get("account_age_seconds", 604800)
+    raid_alert_channel = raid_config.get("alert_channelID", 0)
+    raid_message = raid_config.get(
+        "message",
+        "Your account was flagged by the server's raid protection and you were removed."
+    )
+
 if config["features"]["goodbye"].get("enabled"):
     goodbye_channel = config["features"]["goodbye"].get("channelID")
     goodbye_message = config["features"]["goodbye"].get("message")
@@ -150,10 +165,100 @@ if config["features"]["help"].get("enabled"):
 
 # -- Welcome -- #
 
-if config["features"]["welcome"].get("enabled"):
-    @bot.event
-    async def on_member_join(member):
-        logger.info(f"New member joined: {member.name} (ID: {member.id})")
+async def send_raid_alert(member, message):
+    alert_channel_id = raid_alert_channel or (
+        welcome_channel if config["features"]["welcome"].get("enabled") else 0
+    )
+    alert_channel = bot.get_channel(alert_channel_id)
+    if alert_channel:
+        await alert_channel.send(message)
+
+async def notify_flagged_member(member):
+    try:
+        await member.send(
+            raid_message.format(
+                user=member.name,
+                user_mention=member.mention,
+                guild=member.guild.name
+            )
+        )
+    except (discord.Forbidden, discord.HTTPException) as error:
+        logger.warning(
+            f"Could not send raid protection DM to {member.name} (ID: {member.id}): {error}"
+        )
+
+async def handle_raid_protection(member):
+    if not config["features"].get("raid_protection", {}).get("enabled"):
+        return True
+
+    guild_id = member.guild.id
+    now = time.time()
+    joins = raid_join_history[guild_id]
+
+    while joins and now - joins[0] > raid_per_seconds:
+        joins.popleft()
+
+    joins.append(now)
+
+    if len(joins) >= raid_max_joins and raid_lockdowns.get(guild_id, 0) < now:
+        raid_lockdowns[guild_id] = now + raid_lockdown_seconds
+        logger.warning(
+            f"Raid protection activated in guild {member.guild.name} (ID: {guild_id}) "
+            f"after {len(joins)} joins in {raid_per_seconds} seconds"
+        )
+        await send_raid_alert(
+            member,
+            f"Raid qoruması aktivləşdirildi. Son {raid_per_seconds} saniyədə "
+            f"{len(joins)} qoşulma oldu. Lockdown müddəti: {raid_lockdown_seconds} saniyə."
+        )
+
+    lockdown_ends_at = raid_lockdowns.get(guild_id, 0)
+    if lockdown_ends_at <= now:
+        return True
+
+    account_age_seconds = (discord.utils.utcnow() - member.created_at).total_seconds()
+    if account_age_seconds >= raid_account_age_seconds:
+        logger.info(
+            f"Raid protection allowed {member.name} (ID: {member.id}) during lockdown "
+            f"because account age is {int(account_age_seconds)} seconds"
+        )
+        return True
+
+    await notify_flagged_member(member)
+
+    try:
+        await member.kick(reason="Raid protection triggered during join lockdown")
+        logger.warning(
+            f"Raid protection kicked {member.name} (ID: {member.id}) in guild "
+            f"{member.guild.name} (ID: {guild_id})"
+        )
+    except discord.Forbidden:
+        logger.error(
+            f"Missing permissions to kick {member.name} (ID: {member.id}) "
+            f"during raid protection"
+        )
+        return True
+    except discord.HTTPException as error:
+        logger.error(
+            f"Failed to kick {member.name} (ID: {member.id}) during raid protection: {error}"
+        )
+        return True
+
+    await send_raid_alert(
+        member,
+        f"Raid qoruması {member.mention} istifadəçisini hesabı çox yeni olduğu üçün serverdən çıxartdı."
+    )
+    return False
+
+@bot.event
+async def on_member_join(member):
+    logger.info(f"New member joined: {member.name} (ID: {member.id})")
+
+    should_continue = await handle_raid_protection(member)
+    if not should_continue:
+        return
+
+    if config["features"]["welcome"].get("enabled"):
         channel = bot.get_channel(welcome_channel)
         if channel:
             await channel.send(f"{welcome_message}, {member.mention} 🎉")

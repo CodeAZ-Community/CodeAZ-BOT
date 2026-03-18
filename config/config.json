@@ -73,6 +73,16 @@
         "roleID": 0
       }
     },
+
+    "raid_protection": {
+      "enabled": false,
+      "max_joins": 5,
+      "per_seconds": 10,
+      "lockdown_seconds": 300,
+      "account_age_seconds": 604800,
+      "alert_channelID": 0,
+      "message": "Your account was flagged by {guild}'s raid protection and you were removed from the server. If this was a mistake, please contact the staff team."
+    },
     
     "goodbye": {
       "enabled": false,
