@@ -135,6 +135,8 @@ async def on_ready():
     logger.info(f"Bot is ready. Logged in as {bot.user}")
     # Start the XP save task
     bot.loop.create_task(save_xp_data())
+    if not scheduled_ping.is_running():
+        scheduled_ping.start()
 
 # -- Functions -- #
 
@@ -680,5 +682,17 @@ if config["features"]["meme"].get("enabled"):
         if isinstance(error, commands.CommandOnCooldown):
             seconds_left = math.ceil(error.retry_after)
             await ctx.reply(f"Bu əmri təkrar etmək üçün {seconds_left} saniyə gözləməlisiniz!")
+
+"""
+Here will be some code special to CodeAZ Community
+Commentate it if you won't use it, since it might cause errors
+The code here isn't included in config.json
+"""
+
+@tasks.loop(hours=2)
+async def scheduled_ping():
+    channel = bot.get_channel(1454853658758873251)
+    if channel:
+        await channel.send(f"Bump edin. <@&{1454851358955016244}>")
 
 bot.run(discord_token)
