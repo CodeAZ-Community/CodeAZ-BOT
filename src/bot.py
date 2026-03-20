@@ -693,6 +693,6 @@ The code here isn't included in config.json
 async def scheduled_ping():
     channel = bot.get_channel(1422933244378222642)
     if channel:
-        await channel.send(f"Bump edin. <@&{1457349381127667869}>")
+        await channel.send(f"Bump edin. <@&{1484494090329522258}>")
 
 bot.run(discord_token)
